@@ -8,8 +8,8 @@ from allennlp.modules import FeedForward
 
 import logging
 from transformers import AutoTokenizer
-from transformers.models.camembert.modeling_camembert import CamembertModel, CamembertPreTrainedModel
-
+from transformers.models.camembert.modeling_camembert import CamembertModel
+from transformers.models.roberta.modeling_roberta import RobertaPreTrainedModel as _PreTrained
 
 logger = logging.getLogger('root')
 
@@ -25,21 +25,21 @@ def _pick_sequence_output(outputs):
     return outputs
 
 
-class CamembertForEntity(CamembertPreTrainedModel):
+class CamembertForEntity(_PreTrained):
     """
-    RoBERTa/CamemBERT 家族没有 pooled_output，这里统一从 outputs[0] 取 last_hidden_state。
+    CamemBERT（RoBERTa 家族）没有 pooled_output，这里统一从 outputs[0] 取 last_hidden_state。
     """
     def __init__(self, config, num_ner_labels, head_hidden_dim=150, width_embedding_dim=150, max_span_length=8):
         super().__init__(config)
 
         self.camembert = CamembertModel(config)
-        self.hidden_dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.hidden_dropout = nn.Dropout(getattr(config, "hidden_dropout_prob", 0.1))
         self.width_embedding = nn.Embedding(max_span_length + 1, width_embedding_dim)
 
         self.ner_classifier = nn.Sequential(
             FeedForward(
                 input_dim=config.hidden_size * 2 + width_embedding_dim,
-                num_layers=1,                        # 你只要一层就够了；要两层就把下面列表写两层
+                num_layers=1,
                 hidden_dims=[head_hidden_dim],
                 activations=[nn.ReLU()],
                 dropout=0.2
@@ -47,8 +47,11 @@ class CamembertForEntity(CamembertPreTrainedModel):
             nn.Linear(head_hidden_dim, num_ner_labels)
         )
 
-
-        self.init_weights()
+        # 兼容 transformers 不同版本的权重初始化
+        if hasattr(self, "post_init"):
+            self.post_init()
+        else:
+            self.init_weights()
 
     def _get_span_embeddings(self, input_ids, spans, token_type_ids=None, attention_mask=None):
         # Camembert/RoBERTa 忽略 token_type_ids（传了也不会出错）
@@ -58,7 +61,7 @@ class CamembertForEntity(CamembertPreTrainedModel):
 
         """
         spans: [batch_size, num_spans, 3]; 0: left_end, 1: right_end, 2: width
-        spans_mask: (batch_size, num_spans, )
+        spans_mask: (batch_size, num_spans)
         """
         spans_start = spans[:, :, 0].view(spans.size(0), -1)
         spans_end = spans[:, :, 1].view(spans.size(0), -1)
@@ -75,6 +78,7 @@ class CamembertForEntity(CamembertPreTrainedModel):
         spans_embedding = self._get_span_embeddings(
             input_ids, spans, token_type_ids=token_type_ids, attention_mask=attention_mask
         )
+
         # FFNN 分类头
         hidden = spans_embedding
         for layer in self.ner_classifier:
@@ -105,8 +109,8 @@ class EntityModel():
         model_name = args.model  # 例如 "camembert-base" 或保存目录
         vocab_name = model_name
 
-        if args.bert_model_dir is not None:
-            model_name = str(args.bert_model_dir) + '/'
+        if getattr(args, "bert_model_dir", None) is not None:
+            model_name = str(args.bert_model_dir).rstrip('/') + '/'
             vocab_name = model_name
             logger.info('Loading base model from {}'.format(model_name))
 
@@ -136,22 +140,17 @@ class EntityModel():
             logger.info('CUDA not available. Using CPU.')
             self.bert_model.to(self._model_device)
 
-
     def _get_input_tensors(self, tokens, spans, spans_ner_label):
         start2idx, end2idx = [], []
 
         if self.pretokenized:
             # tokens 已经是子词序列（与本 tokenizer 一致）
             bert_tokens = [self.tokenizer.cls_token] + tokens + [self.tokenizer.sep_token]
-            # 每个“原 tokens 列表中的一个项”就是一个子词单元
-            # 因为 pretokenized 的 spans 就是基于这些子词的索引
             for i in range(len(tokens)):
-                # 注意：这里的 span 假设是以 tokens 的索引为准（即子词索引）
-                # 所以 start/end 都是 i 到 i
                 start2idx.append(1 + i)          # +1 因为前面加了 [CLS]
                 end2idx.append(1 + i)
         else:
-            # 原逻辑：输入 tokens 是“词级别”，这里再切成子词
+            # 输入 tokens 是“词级别”，这里再切成子词
             bert_tokens = [self.tokenizer.cls_token]
             for token in tokens:
                 start2idx.append(len(bert_tokens))
@@ -161,16 +160,15 @@ class EntityModel():
             bert_tokens.append(self.tokenizer.sep_token)
 
         indexed_tokens = self.tokenizer.convert_tokens_to_ids(bert_tokens)
-        tokens_tensor = torch.tensor([indexed_tokens])
+        tokens_tensor = torch.tensor([indexed_tokens], dtype=torch.long)
 
         # 将 (word/子词) span 映射到 BERT 索引空间
         bert_spans = [[start2idx[span[0]], end2idx[span[1]], span[2]] for span in spans]
-        bert_spans_tensor = torch.tensor([bert_spans])
+        bert_spans_tensor = torch.tensor([bert_spans], dtype=torch.long)
 
-        spans_ner_label_tensor = torch.tensor([spans_ner_label])
+        spans_ner_label_tensor = torch.tensor([spans_ner_label], dtype=torch.long)
 
         return tokens_tensor, bert_spans_tensor, spans_ner_label_tensor
-
 
     def _get_input_tensors_batch(self, samples_list, training=True):
         tokens_tensor_list, bert_spans_tensor_list, spans_ner_label_tensor_list = [], [], []
@@ -191,7 +189,7 @@ class EntityModel():
             max_tokens = max(max_tokens, tokens_tensor.shape[1])
             max_spans = max(max_spans, bert_spans_tensor.shape[1])
             sentence_length.append(sample['sent_length'])
-        sentence_length = torch.Tensor(sentence_length)
+        sentence_length = torch.tensor(sentence_length, dtype=torch.float32)
 
         # padding & concat
         final_tokens_tensor = None
