@@ -8,8 +8,7 @@ from allennlp.modules import FeedForward
 
 import logging
 from transformers import AutoTokenizer
-from transformers import CamembertModel, CamembertPreTrainedModel
-
+from transformers.models.camembert.modeling_camembert import CamembertModel, CamembertPreTrainedModel
 
 
 logger = logging.getLogger('root')
