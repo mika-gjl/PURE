@@ -17,11 +17,13 @@ logger = logging.getLogger('root')
 def _pick_sequence_output(outputs):
     """
     兼容不同 transformers 版本的返回结构：
-    - 老版返回 (last_hidden_state, pooled_output, ...)
-    - 新版返回 BaseModelOutput，但 index 0 仍是 last_hidden_state
+    - tuple/list: 取 index 0
+    - dataclass: 有 last_hidden_state 就取它
     """
     if isinstance(outputs, (tuple, list)):
         return outputs[0]
+    if hasattr(outputs, "last_hidden_state"):
+        return outputs.last_hidden_state
     return outputs
 
 
