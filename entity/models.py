@@ -7,10 +7,9 @@ from allennlp.nn.util import batched_index_select
 from allennlp.modules import FeedForward
 
 import logging
-from transformers import AutoTokenizer
 from transformers.models.camembert.modeling_camembert import CamembertModel
 from transformers.models.roberta.modeling_roberta import RobertaPreTrainedModel as _PreTrained
-
+from transformers import CamembertTokenizer
 logger = logging.getLogger('root')
 
 
@@ -118,7 +117,9 @@ class EntityModel():
 
         self.pretokenized = getattr(args, "pretokenized", False)
 
-        self.tokenizer = AutoTokenizer.from_pretrained(vocab_name, use_fast=False)
+        
+        self.tokenizer = CamembertTokenizer.from_pretrained(vocab_name)
+
         self.bert_model = CamembertForEntity.from_pretrained(
             model_name, num_ner_labels=num_ner_labels, max_span_length=args.max_span_length
         )
