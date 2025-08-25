@@ -9,7 +9,7 @@ import random
 import time
 import json
 import sys
-
+from tqdm import tqdm
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
@@ -18,7 +18,7 @@ from collections import Counter
 from torch.nn import CrossEntropyLoss
 
 from transformers.file_utils import PYTORCH_PRETRAINED_BERT_CACHE, WEIGHTS_NAME, CONFIG_NAME
-from relation.models import BertForRelation, AlbertForRelation
+from relation.models import BertForRelation
 from transformers import AutoTokenizer
 from transformers import AdamW, get_linear_schedule_with_warmup
 
@@ -80,7 +80,8 @@ def convert_examples_to_features(examples, label2id, max_seq_length, tokenizer, 
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
 
-        tokens = [CLS]
+                # >>> 用 tokenizer 的特殊符号，兼容 CamemBERT/RoBERTa
+        tokens = [tokenizer.cls_token]
         SUBJECT_START = get_special_token("SUBJ_START")
         SUBJECT_END = get_special_token("SUBJ_END")
         OBJECT_START = get_special_token("OBJ_START")
@@ -106,7 +107,7 @@ def convert_examples_to_features(examples, label2id, max_seq_length, tokenizer, 
                 tokens.append(SUBJECT_END_NER)
             if i == example['obj_end']:
                 tokens.append(OBJECT_END_NER)
-        tokens.append(SEP)
+        tokens.append(tokenizer.sep_token)
 
         num_tokens += len(tokens)
         max_tokens = max(max_tokens, len(tokens))
@@ -194,7 +195,7 @@ def evaluate(model, device, eval_dataloader, eval_label_ids, num_labels, e2e_ngo
     eval_loss = 0
     nb_eval_steps = 0
     preds = []
-    for input_ids, input_mask, segment_ids, label_ids, sub_idx, obj_idx in eval_dataloader:
+    for input_ids, input_mask, segment_ids, label_ids, sub_idx, obj_idx in tqdm(eval_dataloader, desc="Evaluating"):
         input_ids = input_ids.to(device)
         input_mask = input_mask.to(device)
         segment_ids = segment_ids.to(device)
@@ -261,14 +262,21 @@ def save_trained_model(output_dir, model, tokenizer):
     output_config_file = os.path.join(output_dir, CONFIG_NAME)
     torch.save(model_to_save.state_dict(), output_model_file)
     model_to_save.config.to_json_file(output_config_file)
-    tokenizer.save_vocabulary(output_dir)
+    # >>> 改这里：
+    tokenizer.save_pretrained(output_dir)
+
 
 def main(args):
-    if 'albert' in args.model:
+    model_name_l = (args.model or "").lower()
+    if 'albert' in model_name_l:
         RelationModel = AlbertForRelation
         args.add_new_tokens = True
     else:
+        # 走我们改过底座为 CamemBERT 的 BertForRelation
         RelationModel = BertForRelation
+        # 对 RoBERTa/CamemBERT 强制新增自定义标记，避免 [unusedX]
+        args.add_new_tokens = True
+
 
     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     n_gpu = torch.cuda.device_count()
@@ -281,7 +289,13 @@ def main(args):
         eval_dataset, eval_examples, eval_nrel = generate_relation_data(os.path.join(args.entity_output_dir, args.entity_predictions_dev), use_gold=args.eval_with_gold, context_window=args.context_window)
     # test set
     if args.eval_test:
-        test_dataset, test_examples, test_nrel = generate_relation_data(os.path.join(args.entity_output_dir, args.entity_predictions_test), use_gold=args.eval_with_gold, context_window=args.context_window)
+        test_gold_path = os.path.join(args.entity_output_dir, "ent_pred_test.json")
+        test_pred_path = os.path.join(args.entity_output_dir, args.entity_predictions_test)
+
+        test_dataset, test_examples, test_nrel = generate_relation_data(
+        args.entity_predictions_test,
+        use_gold=args.eval_with_gold,
+        context_window=args.context_window)
 
     setseed(args.seed)
 
@@ -511,9 +525,9 @@ if __name__ == "__main__":
     parser.add_argument("--entity_predictions_dev", type=str, default="ent_pred_dev.json", help="The entity prediction file of the dev set")
     parser.add_argument("--entity_predictions_test", type=str, default="ent_pred_test.json", help="The entity prediction file of the test set")
 
-    parser.add_argument("--prediction_file", type=str, default="predictions.json", help="The prediction filename for the relation model")
+    parser.add_argument("--prediction_file", type=str, default="predictions.jsonl", help="The prediction filename for the relation model")
 
-    parser.add_argument('--task', type=str, default=None, required=True, choices=['ace04', 'ace05', 'scierc'])
+    parser.add_argument('--task', type=str, default=None, required=True, choices=['custom'])
     parser.add_argument('--context_window', type=int, default=0)
 
     parser.add_argument('--add_new_tokens', action='store_true', 

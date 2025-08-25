@@ -152,6 +152,8 @@ if __name__ == '__main__':
                         help="whether to run evaluation")
     parser.add_argument('--eval_test', action='store_true', 
                         help="whether to evaluate on test set")
+    parser.add_argument('--do_predict', action='store_true', help="Only run prediction on test set.")
+
     parser.add_argument('--dev_pred_filename', type=str, default="ent_pred_dev.json", help="the prediction filename for the dev set")
     parser.add_argument('--test_pred_filename', type=str, default="ent_pred_test.json", help="the prediction filename for the test set")
 
@@ -253,6 +255,35 @@ if __name__ == '__main__':
                         best_result = f1
                         logger.info('!!! Best valid (epoch=%d): %.2f' % (_, f1*100))
                         save_model(model, args)
+    # =================== ONLY PREDICTION ========================
+    if args.do_predict:
+        logger.info("***** Running prediction on test set *****")
+
+        # 用训练好的权重：从 output_dir 读取（这里面应有 config.json / pytorch_model.bin / tokenizer files）
+        if os.path.exists(os.path.join(args.output_dir, "config.json")):
+            args.bert_model_dir = args.output_dir
+        elif args.bert_model_dir is None:
+            raise ValueError("No checkpoint to load. Set --bert_model_dir to a HF model or train first.")
+
+        # 重新构建模型（会在 __init__ 里从 args.bert_model_dir 加载权重）
+        model = EntityModel(args, num_ner_labels=num_ner_labels)
+
+        # 准备测试数据并打成 batch
+        test_data = Dataset(args.test_data)
+        test_samples, _ = convert_dataset_to_samples(
+            test_data,
+            args.max_span_length,
+            ner_label2id=ner_label2id,
+            context_window=args.context_window
+        )
+        test_batches = batchify(test_samples, args.eval_batch_size)
+
+        # 直接复用已有的导出函数：只生成 NER 预测（relations 留空）
+        prediction_file = os.path.join(args.output_dir, args.test_pred_filename)
+        output_ner_predictions(model, test_batches, test_data, output_file=prediction_file)
+        logger.info(f"✅ Prediction saved to: {prediction_file}")
+        sys.exit(0)
+
 
     if args.do_eval:
         args.bert_model_dir = args.output_dir
