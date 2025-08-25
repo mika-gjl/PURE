@@ -9,7 +9,7 @@ task_rel_labels = {
     'ace04': ['PER-SOC', 'OTHER-AFF', 'ART', 'GPE-AFF', 'EMP-ORG', 'PHYS'],
     'ace05': ['ART', 'ORG-AFF', 'GEN-AFF', 'PHYS', 'PER-SOC', 'PART-WHOLE'],
     'scierc': ['PART-OF', 'USED-FOR', 'FEATURE-OF', 'CONJUNCTION', 'EVALUATE-FOR', 'HYPONYM-OF', 'COMPARE'],
-    'custom': ['appearsOn', 'disappearsOn', 'hasAppearedRelationOn', 'hasDisappearedRelationOn', 'hasGeometryChangeOn', 'hasNameChangeOn', 'hasNewName', 'hasOldName', 'isClassifiedOn', 'isLandmarkTypeOf', 'isNumberedOn','touches', 'within'],
+    'custom': ['isLandmarkTypeOf', 'hasNewName', 'hasGeometryChangeOn', 'hasNameChangeOn', 'touches', 'hasOldName', 'hasDisappearedRelationOn', 'disappearsOn', 'hasNewGeometry', 'appearsOn', 'isLandmarkType', 'within', 'hasAppearedRelationOn'],
 }
 
 def get_labelmap(label_list):

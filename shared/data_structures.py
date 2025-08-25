@@ -71,6 +71,17 @@ class Document:
     def __init__(self, js):
         self._doc_key = js["doc_key"]
         entries = fields_to_batches(js, ["doc_key", "dataset", "clusters", "predicted_clusters", "section_starts"])
+                # Inject sentence-level predicted NERs from document-level fields
+        if "predicted_ner" in js:
+            for entry, predicted_ner in zip(entries, js["predicted_ner"]):
+                entry["predicted_ner"] = predicted_ner
+        if "predicted_relations" in js:
+            for entry, predicted_rel in zip(entries, js["predicted_relations"]):
+                entry["predicted_relations"] = predicted_rel
+        if "predicted_events" in js:
+            for entry, predicted_events in zip(entries, js["predicted_events"]):
+                entry["predicted_events"] = predicted_events
+
         sentence_lengths = [len(entry["sentences"]) for entry in entries]
         sentence_starts = np.cumsum(sentence_lengths)
         sentence_starts = np.roll(sentence_starts, 1)
