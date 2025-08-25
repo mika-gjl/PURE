@@ -24,7 +24,7 @@ def generate_relation_data(entity_data, use_gold=False, context_window=0):
     If training: set use_gold = True
     """
     logger.info('Generate relation data from %s'%(entity_data))
-    data = Dataset(entity_data)
+    data = Dataset(json_file=entity_data, pred_file=entity_data)
 
     nner, nrel = 0, 0
     max_sentsample = 0
@@ -39,7 +39,7 @@ def generate_relation_data(entity_data, use_gold=False, context_window=0):
                 sent_ner = sent.ner
             else:
                 sent_ner = sent.predicted_ner
-            
+            logger.info(f"[DEBUG] {doc._doc_key} sentence {i} predicted_ner count: {len(sent_ner)}")
             gold_ner = {}
             for ner in sent.ner:
                 gold_ner[ner.span] = ner.label
